@@ -1,32 +1,37 @@
 ---
 name: wechat-skill
-description: Operate the Windows WeChat/Weixin desktop client through the local panxingfeng/mcp_server_wechat + pyweixin setup. Use when asked to send WeChat messages, summarize recent chat history, find groups by members, inspect group membership, download recent chat images/media, install or repair the WeChat MCP server, or troubleshoot local WeChat MCP automation.
+description: Operate the Windows WeChat/Weixin desktop client directly from a pure Codex skill using bundled pyweixin automation and a skill-local Python runtime. Use when asked to install or repair the WeChat skill, send WeChat messages, summarize or export recent chat history, find groups by members, inspect group membership, download recent chat images/media, or troubleshoot local WeChat desktop automation without MCP.
 ---
 
 # Wechat Skill
 
-Use this skill for local Windows WeChat/Weixin desktop automation. The runtime uses the bundled `mcp_server_wechat` source with WeChat/Weixin 4.1+ support applied directly through the bundled `pyweixin` source.
+Use this skill for local Windows WeChat/Weixin desktop automation. This is a pure skill: do not use an MCP server, do not configure `mcp_servers.wechat`, and do not require a Codex restart after install.
 
 Before running UI automation, tell the user not to interact with WeChat until the task finishes.
 
-## Install Or Repair MCP
+## Install Or Repair
 
-Run the bundled installer to create the MCP virtual environment, install package dependencies, copy the bundled MCP/`pyweixin` source into the venv, and update `~/.codex/config.toml`.
+Run the bundled installer to create a skill-local venv and install only the Windows automation dependencies. The installer also removes the legacy `[mcp_servers.wechat]` block from `~/.codex/config.toml` if it exists.
 
 ```powershell
 $skill = "$HOME\.codex\skills\wechat-skill"
-python "$skill\scripts\install_wechat_mcp.py"
+python "$skill\scripts\install_wechat_skill.py"
 ```
 
-After install, restart Codex.
+Runtime variables for task commands:
 
-The installer configures:
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+$skill = "$HOME\.codex\skills\wechat-skill"
+$py = "$skill\.venv\Scripts\python.exe"
+$task = "$skill\scripts\wechat_task.py"
+```
 
-```toml
-[mcp_servers.wechat]
-command = 'C:\Users\<you>\.codex\mcp\mcp_server_wechat\venv\Scripts\python.exe'
-args = ["-m", "mcp_server_wechat", "--folder-path=C:/Users/<you>/.codex/mcp/mcp_server_wechat/history"]
-startup_timeout_sec = 120
+Check readiness:
+
+```powershell
+& $py $task import-check
+& $py $task readiness
 ```
 
 Prerequisites:
@@ -35,171 +40,83 @@ Prerequisites:
 - `Weixin.exe` must be running and logged in before automation.
 - Registry key should exist: `HKCU\Software\Tencent\Weixin`.
 
-Check readiness:
+## Send Messages
+
+For requests like "给 Yvonne 发微信说 ...":
 
 ```powershell
-Get-Process -ErrorAction SilentlyContinue |
-  Where-Object { $_.ProcessName -eq 'Weixin' } |
-  Select-Object ProcessName,Id,MainWindowTitle,Path
+& $py $task send-message --to "Yvonne" --message "你作业做好了吗" --search-pages 0 --delay 0.5
 ```
 
-Use UTF-8 output for Chinese names:
+If the command returns `"status": "ok"`, report that the send command completed. Do not invent delivery or read status.
+
+For several messages to one chat:
 
 ```powershell
-$env:PYTHONIOENCODING='utf-8'
-$py = "$HOME\.codex\mcp\mcp_server_wechat\venv\Scripts\python.exe"
+& $py $task send-messages --to "Yvonne" --message "第一条" --message "第二条" --search-pages 0 --delay 0.5
 ```
 
-## Send A Message
-
-Use this for requests like "给 Yvonne 发微信说 ...".
+For one message to several chats:
 
 ```powershell
-$env:PYTHONIOENCODING='utf-8'
-$py="$HOME\.codex\mcp\mcp_server_wechat\venv\Scripts\python.exe"
-@'
-from pyweixin.WeChatAuto import Messages
-
-Messages.send_messages_to_friend(
-    friend="Yvonne",
-    messages=["你作业做好了吗"],
-    search_pages=0,
-    send_delay=0.5,
-    close_weixin=False,
-)
-print("SEND_OK")
-'@ | & $py -
+& $py $task send-to-many --to '["Yvonne","Jenny Chen"]' --message "同一条消息" --delay 0.5
 ```
 
-If the command returns `SEND_OK`, report that it was sent. Do not invent delivery/read status.
+## Find Groups
 
-## Find A Group By Members
-
-Use this when the user describes a group by people in it instead of exact group name.
-
-1. Get shared groups with one named member.
-2. Inspect likely candidates with `Contacts.get_groupMembers_info`.
-3. If multiple groups match, ask the user to choose.
+When the user describes a group by people in it instead of an exact group name, first list common groups with one named member:
 
 ```powershell
-$env:PYTHONIOENCODING='utf-8'
-$py="$HOME\.codex\mcp\mcp_server_wechat\venv\Scripts\python.exe"
-@'
-from pyweixin.WeChatAuto import FriendSettings, Contacts
-
-member = "Jenny Chen"
-groups = FriendSettings.get_common_groups(
-    friend=member,
-    search_pages=0,
-    is_maximize=False,
-    close_weixin=False,
-)
-print(groups)
-
-candidates = [g for g in groups if "665zvc" in g or "Jenny Chen" in g]
-for group in candidates:
-    print(f"=== {group} ===")
-    try:
-        members = Contacts.get_groupMembers_info(
-            group=group,
-            search_pages=0,
-            is_maximize=False,
-            close_weixin=False,
-        )
-        print(f"COUNT={len(members)}")
-        print("\n".join(members))
-    except Exception as e:
-        print(type(e).__name__, e)
-'@ | & $py -
+$out = Join-Path (Resolve-Path '.').Path "wechat_outputs\common_groups.json"
+& $py $task common-groups --member "Jenny Chen" --search-pages 0 --out $out
 ```
 
-## Download Recent Images
-
-`Messages.save_media` saves recent images and videos. When the user specifically asks for images, run a wider media pass, then copy the first N `.png` files into a clean folder.
+Inspect likely candidates:
 
 ```powershell
-$env:PYTHONIOENCODING='utf-8'
+$out = Join-Path (Resolve-Path '.').Path "wechat_outputs\group_members.json"
+& $py $task group-members --group "GROUP_NAME" --search-pages 0 --out $out
+```
+
+If multiple groups match the described members, ask the user to choose. If the user chooses "the first one", use the first matching candidate from the last enumerated list.
+
+## Download Images Or Media
+
+Use `save-images` when the user asks for images. It performs a wider media scan, then copies only image files into a clean folder.
+
+```powershell
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$raw = Join-Path (Resolve-Path '.').Path "wechat_downloads\group_raw_$stamp"
-$clean = Join-Path (Resolve-Path '.').Path "wechat_downloads\group_10_images_$stamp"
-New-Item -ItemType Directory -Force -Path $raw,$clean | Out-Null
-
-$py="$HOME\.codex\mcp\mcp_server_wechat\venv\Scripts\python.exe"
-@"
-from pyweixin.WeChatAuto import Messages
-Messages.save_media(
-    friend="渔之民、Jenny Chen、665zvc",
-    number=25,
-    target_folder=r"$raw",
-    search_pages=0,
-    is_maximize=False,
-    close_weixin=False,
-)
-print("SAVE_MEDIA_DONE")
-"@ | & $py -
-
-$images = Get-ChildItem -LiteralPath $raw -File -Filter *.png |
-  Sort-Object { if ($_.BaseName -match '(\d+)$') { [int]$matches[1] } else { [int]::MaxValue } } |
-  Select-Object -First 10
-
-$i=1
-foreach ($img in $images) {
-  Copy-Item -LiteralPath $img.FullName -Destination (Join-Path $clean ("recent_image_{0:00}.png" -f $i))
-  $i++
-}
-
-Get-ChildItem -LiteralPath $clean -File | Select-Object Name,Length,LastWriteTime
+$out = Join-Path (Resolve-Path '.').Path "wechat_outputs\images_$stamp"
+& $py $task save-images --chat "GROUP_OR_CHAT_NAME" --number 10 --scan-number 25 --search-pages 0 --out $out
 ```
 
-If fewer than the requested number of images are saved, report the actual count and folder.
+Use `save-media` when the user asks for images and videos together:
+
+```powershell
+$stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$out = Join-Path (Resolve-Path '.').Path "wechat_outputs\media_$stamp"
+& $py $task save-media --chat "GROUP_OR_CHAT_NAME" --number 25 --search-pages 0 --out $out
+```
+
+If fewer files are saved than requested, report the actual count and folder.
 
 ## Summarize Recent Chat
 
-Use `dump_chat_history` for summaries because it includes timestamps. Export JSON first, then summarize from the file.
+Export JSON first, then summarize from the saved file. Prefer `dump-chat` because it includes timestamps.
 
 ```powershell
-$env:PYTHONIOENCODING='utf-8'
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$outDir = Join-Path (Resolve-Path '.').Path "wechat_summaries\seattle_shanghai_club_$stamp"
-New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-$jsonPath = Join-Path $outDir "recent_80_messages.json"
-
-$py="$HOME\.codex\mcp\mcp_server_wechat\venv\Scripts\python.exe"
-@"
-import json
-from pyweixin.WeChatAuto import Messages
-
-records = Messages.dump_chat_history(
-    friend="Seattle Shanghai Club",
-    number=80,
-    is_json=False,
-    save_detail=False,
-    search_pages=0,
-    is_maximize=False,
-    close_weixin=False,
-)
-
-with open(r"$jsonPath", "w", encoding="utf-8") as f:
-    json.dump(records, f, ensure_ascii=False, indent=2)
-
-print("JSON=" + r"$jsonPath")
-print("COUNT=" + str(len(records)))
-"@ | & $py -
+$out = Join-Path (Resolve-Path '.').Path "wechat_outputs\seattle_shanghai_club_$stamp.json"
+& $py $task dump-chat --chat "Seattle Shanghai Club" --number 80 --search-pages 0 --out $out
 ```
 
 Summaries should include message count, time range, main topics, decisions, asks, plans, and action items. Mention media only as placeholders unless the user asks to inspect or download it.
 
-## Useful Direct APIs
+Use `pull-messages` only when the chat-history window path fails:
 
-```python
-from pyweixin.WeChatAuto import Contacts, FriendSettings, Messages
-
-Messages.send_messages_to_friend(friend, [message], search_pages=0, close_weixin=False)
-Messages.dump_chat_history(friend, number=80, search_pages=0, close_weixin=False)
-Messages.pull_messages(friend, number=50, search_pages=0, close_weixin=False)
-Messages.save_media(friend, number=25, target_folder=folder, search_pages=0, close_weixin=False)
-FriendSettings.get_common_groups(friend, search_pages=0, close_weixin=False)
-Contacts.get_groupMembers_info(group, search_pages=0, close_weixin=False)
+```powershell
+$out = Join-Path (Resolve-Path '.').Path "wechat_outputs\recent_messages.json"
+& $py $task pull-messages --chat "CHAT_NAME" --number 50 --search-pages 0 --out $out
 ```
 
 ## Troubleshooting
@@ -207,5 +124,5 @@ Contacts.get_groupMembers_info(group, search_pages=0, close_weixin=False)
 - `NotFoundError` locating main window: check that the visible main window title is `WeChat`; bundled `pyweixin\WeChatTools.py` searches `微信`, `WeChat`, then `Weixin`.
 - Cannot find sidebar tab: bundled `pyweixin\Uielements.py` has a main tab selector that accepts `微信|Weixin|WeChat`.
 - `UnicodeEncodeError`: set `$env:PYTHONIOENCODING='utf-8'`.
-- Search misses a chat: try `search_pages=5`; if there are still multiple possible groups, enumerate candidates and ask the user to choose.
-- Do not claim a message was delivered or read; only claim the automation command completed.
+- Search misses a chat: try `--search-pages 5`; if there are still multiple possible groups, enumerate candidates and ask the user to choose.
+- If legacy MCP tools still appear in the current Codex session after conversion, restart Codex once to unload the old server; future skill use should run only `scripts\wechat_task.py`.
