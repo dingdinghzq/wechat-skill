@@ -1,16 +1,18 @@
 #!/usr/bin/env python
-"""Install and patch the local WeChat MCP server for Codex on Windows."""
+"""Install the bundled WeChat MCP server for Codex on Windows."""
 
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 
 PACKAGE = "mcp_server_wechat==0.8"
+VENDORED_PACKAGES = ("mcp_server_wechat", "pyweixin")
 
 
 def run(args: list[str]) -> None:
@@ -18,108 +20,14 @@ def run(args: list[str]) -> None:
     subprocess.check_call(args)
 
 
-def replace_once(path: Path, old: str, new: str) -> None:
-    text = path.read_text(encoding="utf-8")
-    if new in text:
-        return
-    if old not in text:
-        raise RuntimeError(f"Could not find expected text in {path}: {old[:80]!r}")
-    path.write_text(text.replace(old, new, 1), encoding="utf-8")
-
-
-def patch_wechat_client(site_packages: Path) -> None:
-    path = site_packages / "mcp_server_wechat" / "WechatClient.py"
-    backup = path.with_suffix(path.suffix + ".codex-backup")
-    if not backup.exists():
-        backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-
-    replace_once(
-        path,
-        "from pywechat import Systemsettings, NotFolderError, Tools, NoChatHistoryError\n"
-        "from pywechat.WechatAuto import Messages",
-        "from pyweixin import SystemSettings as Systemsettings, Tools, Navigator\n"
-        "from pyweixin.Errors import NotFolderError, NoChatHistoryError\n"
-        "from pyweixin.WeChatAuto import Messages",
-    )
-    replace_once(
-        path,
-        "if not Systemsettings.is_dirctory(folder_path):",
-        "if not os.path.isdir(folder_path):",
-    )
-    replace_once(
-        path,
-        "chat_history_result = Tools.open_chat_history(friend=friend, wechat_path=wechat_path, is_maximize=is_maximize,\n"
-        "                                                          close_wechat=close_wechat, search_pages=search_pages)",
-        "chat_history_result = Navigator.open_chat_history(friend=friend, wechat_path=wechat_path, is_maximize=is_maximize,\n"
-        "                                                              close_wechat=close_wechat, search_pages=search_pages)",
-    )
-    replace_once(
-        path,
-        "chat_history_result = Tools.open_chat_history(friend=friend, is_maximize=is_maximize,\n"
-        "                                                          close_weixin=close_wechat, search_pages=search_pages)",
-        "chat_history_result = Navigator.open_chat_history(friend=friend, is_maximize=is_maximize,\n"
-        "                                                              close_weixin=close_wechat, search_pages=search_pages)",
-    )
-
-    text = path.read_text(encoding="utf-8")
-    text = text.replace("delay=delay,", "send_delay=delay,")
-    text = text.replace(
-        "Messages.send_message_to_friends(\n"
-        "                friends=friends,\n"
-        "                message=message\n"
-        "            )",
-        "if isinstance(message, list):\n"
-        "                messages = [[item] for item in message]\n"
-        "            else:\n"
-        "                messages = [[message] for _ in friends]\n"
-        "            Messages.send_messages_to_friends(\n"
-        "                friends=friends,\n"
-        "                messages=messages,\n"
-        "                send_delay=delay\n"
-        "            )",
-    )
-    text = text.replace(
-        "Messages.send_messages_to_friends(\n"
-        "                friends=friends,\n"
-        "                messages=messages\n"
-        "            )",
-        "Messages.send_messages_to_friends(\n"
-        "                friends=friends,\n"
-        "                messages=messages,\n"
-        "                send_delay=delay\n"
-        "            )",
-    )
-    path.write_text(text, encoding="utf-8")
-
-
-def patch_pyweixin(site_packages: Path) -> None:
-    tools = site_packages / "pyweixin" / "WeChatTools.py"
-    backup = tools.with_suffix(tools.suffix + ".codex-backup")
-    if not backup.exists():
-        backup.write_text(tools.read_text(encoding="utf-8"), encoding="utf-8")
-    replace_once(
-        tools,
-        "hwnd=win32gui.FindWindow('Qt51514QWindowIcon','微信')\n"
-        "        if hwnd==0:hwnd=win32gui.FindWindow('Qt51514QWindowIcon','Weixin')",
-        "hwnd=win32gui.FindWindow('Qt51514QWindowIcon','微信')\n"
-        "        if hwnd==0:hwnd=win32gui.FindWindow('Qt51514QWindowIcon','WeChat')\n"
-        "        if hwnd==0:hwnd=win32gui.FindWindow('Qt51514QWindowIcon','Weixin')",
-    )
-
-    ui = site_packages / "pyweixin" / "Uielements.py"
-    backup = ui.with_suffix(ui.suffix + ".codex-backup")
-    if not backup.exists():
-        backup.write_text(ui.read_text(encoding="utf-8"), encoding="utf-8")
-    text = ui.read_text(encoding="utf-8")
-    text = text.replace(
-        "self.Weixin={'title':'微信','control_type':'Button','class_name':\"mmui::XTabBarItem\"}",
-        "self.Weixin={'title_re':'微信|Weixin|WeChat','control_type':'Button','class_name':\"mmui::XTabBarItem\"}",
-    )
-    text = text.replace(
-        "self.Weixin={'title':'Weixin','control_type':'Button','class_name':\"mmui::XTabBarItem\"}",
-        "self.Weixin={'title_re':'微信|Weixin|WeChat','control_type':'Button','class_name':\"mmui::XTabBarItem\"}",
-    )
-    ui.write_text(text, encoding="utf-8")
+def copy_vendor_package(vendor_root: Path, site_packages: Path, package_name: str) -> None:
+    source = vendor_root / package_name
+    target = site_packages / package_name
+    if not source.is_dir():
+        raise RuntimeError(f"Missing bundled package: {source}")
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target)
 
 
 def update_codex_config(codex_home: Path, python_exe: Path, history_dir: Path) -> None:
@@ -147,6 +55,9 @@ def main() -> None:
     if os.name != "nt":
         raise SystemExit("This installer is for Windows WeChat/Weixin desktop automation.")
 
+    script_dir = Path(__file__).resolve().parent
+    skill_root = script_dir.parent
+    vendor_root = skill_root / "vendor"
     codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
     mcp_root = codex_home / "mcp" / "mcp_server_wechat"
     venv_dir = mcp_root / "venv"
@@ -170,8 +81,9 @@ def main() -> None:
     ).strip()
     site_packages = Path(site_packages_raw)
 
-    patch_wechat_client(site_packages)
-    patch_pyweixin(site_packages)
+    for package_name in VENDORED_PACKAGES:
+        copy_vendor_package(vendor_root, site_packages, package_name)
+
     update_codex_config(codex_home, python_exe, history_dir)
 
     subprocess.check_call(
@@ -184,6 +96,7 @@ def main() -> None:
         ]
     )
     print(f"Installed MCP venv: {venv_dir}")
+    print(f"Copied bundled source from: {vendor_root}")
     print(f"Updated Codex config: {codex_home / 'config.toml'}")
     print("Restart Codex to load the wechat MCP server.")
 

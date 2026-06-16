@@ -5,13 +5,13 @@ description: Operate the Windows WeChat/Weixin desktop client through the local 
 
 # Wechat Skill
 
-Use this skill for local Windows WeChat/Weixin desktop automation. The runtime uses `mcp_server_wechat` with local compatibility patches for WeChat/Weixin 4.1+ via `pyweixin`.
+Use this skill for local Windows WeChat/Weixin desktop automation. The runtime uses the bundled `mcp_server_wechat` source with WeChat/Weixin 4.1+ support applied directly through the bundled `pyweixin` source.
 
 Before running UI automation, tell the user not to interact with WeChat until the task finishes.
 
 ## Install Or Repair MCP
 
-Run the bundled installer to create the MCP virtual environment, install `mcp_server_wechat`, apply the WeChat 4.1+ patches, and update `~/.codex/config.toml`.
+Run the bundled installer to create the MCP virtual environment, install package dependencies, copy the bundled MCP/`pyweixin` source into the venv, and update `~/.codex/config.toml`.
 
 ```powershell
 $skill = "$HOME\.codex\skills\wechat-skill"
@@ -204,8 +204,8 @@ Contacts.get_groupMembers_info(group, search_pages=0, close_weixin=False)
 
 ## Troubleshooting
 
-- `NotFoundError` locating main window: check that the visible main window title is `WeChat`; the installer patches `pyweixin\WeChatTools.py` to search `微信`, `WeChat`, then `Weixin`.
-- Cannot find sidebar tab: the installer patches `pyweixin\Uielements.py` so the main tab selector accepts `微信|Weixin|WeChat`.
+- `NotFoundError` locating main window: check that the visible main window title is `WeChat`; bundled `pyweixin\WeChatTools.py` searches `微信`, `WeChat`, then `Weixin`.
+- Cannot find sidebar tab: bundled `pyweixin\Uielements.py` has a main tab selector that accepts `微信|Weixin|WeChat`.
 - `UnicodeEncodeError`: set `$env:PYTHONIOENCODING='utf-8'`.
 - Search misses a chat: try `search_pages=5`; if there are still multiple possible groups, enumerate candidates and ask the user to choose.
 - Do not claim a message was delivered or read; only claim the automation command completed.
