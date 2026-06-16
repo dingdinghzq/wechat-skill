@@ -42,10 +42,10 @@ Prerequisites:
 
 ## Send Messages
 
-For requests like "给 Yvonne 发微信说 ...":
+For requests like "给 Example Friend 发微信说 ...":
 
 ```powershell
-& $py $task send-message --to "Yvonne" --message "你作业做好了吗" --search-pages 0 --delay 0.5
+& $py $task send-message --to "Example Friend" --message "你作业做好了吗" --search-pages 0 --delay 0.5
 ```
 
 If the command returns `"status": "ok"`, report that the send command completed. Do not invent delivery or read status.
@@ -53,13 +53,13 @@ If the command returns `"status": "ok"`, report that the send command completed.
 For several messages to one chat:
 
 ```powershell
-& $py $task send-messages --to "Yvonne" --message "第一条" --message "第二条" --search-pages 0 --delay 0.5
+& $py $task send-messages --to "Example Friend" --message "第一条" --message "第二条" --search-pages 0 --delay 0.5
 ```
 
 For one message to several chats:
 
 ```powershell
-& $py $task send-to-many --to '["Yvonne","Jenny Chen"]' --message "同一条消息" --delay 0.5
+& $py $task send-to-many --to '["Example Friend","Example Teammate"]' --message "同一条消息" --delay 0.5
 ```
 
 ## Find Groups
@@ -68,7 +68,7 @@ When the user describes a group by people in it instead of an exact group name, 
 
 ```powershell
 $out = Join-Path (Resolve-Path '.').Path "wechat_outputs\common_groups.json"
-& $py $task common-groups --member "Jenny Chen" --search-pages 0 --out $out
+& $py $task common-groups --member "Example Teammate" --search-pages 0 --out $out
 ```
 
 Inspect likely candidates:
@@ -106,8 +106,8 @@ Export JSON first, then summarize from the saved file. Prefer `dump-chat` becaus
 
 ```powershell
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$out = Join-Path (Resolve-Path '.').Path "wechat_outputs\seattle_shanghai_club_$stamp.json"
-& $py $task dump-chat --chat "Seattle Shanghai Club" --number 80 --search-pages 0 --out $out
+$out = Join-Path (Resolve-Path '.').Path "wechat_outputs\example_group_chat_$stamp.json"
+& $py $task dump-chat --chat "Example Group Chat" --number 80 --search-pages 0 --out $out
 ```
 
 Summaries should include message count, time range, main topics, decisions, asks, plans, and action items. Mention media only as placeholders unless the user asks to inspect or download it.
